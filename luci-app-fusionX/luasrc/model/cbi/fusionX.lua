@@ -1,0 +1,376 @@
+local sys = require "luci.sys"
+local http = require "luci.http"
+local uci = require "luci.model.uci".cursor()
+local versionthis = 'V1.0.0'
+local m = Map("fusionX", translate("Bonding"))
+
+local function file_exists(name)
+    local f = io.open(name, "r")
+    if f then
+        f:close()
+        return true
+    else
+        return false
+    end
+end
+
+-- Fetch current IP address
+local current_ip = uci:get("fusionX", "settings", "public_ip")
+-- if public ip does not start with 102 then set it to 0.0.0.0
+-- Display current IP address at the top of the page
+if(current_ip == "0.0.0.0") then
+    sys.exec("/etc/init.d/fusionX disable")
+end
+
+current_ip = uci:get("fusionX", "settings", "public_ip")
+-- if public ip does not start with 102 then set it to 0.0.0.0
+-- Display current IP address at the top of the page
+m.description = translate("Bond Server: ") .. current_ip
+-- Get the MAC address
+local mac_address = "none"
+
+-- Get the current version from the configuration file
+local current_version = uci:get("fusionX", "settings", "version")
+
+-- Run the curl command to get the message from the server
+local curl_command = string.format("curl -s -m 2 -X POST -d 'mac=%s&versionthis=%s' http://102.132.169.58:4268/fusionxversion", mac_address, versionthis)
+local server_response = sys.exec(curl_command):gsub("\n", ""):gsub("^%s*(.-)%s*$", "%1")
+server_response = server_response:gsub('^"(.-)"$', '%1')
+-- Compare the versions and set the message
+local message_text = "up to date"
+local show_upgrade_button = false
+-- Log the server response
+sys.exec("echo 'Processed server response: " .. server_response .. "' >> /tmp/fusionX.log")
+
+if server_response == "upgrade" then
+    message_text = "new version available"
+    show_upgrade_button = true
+    sys.exec("echo 'Comparison successful' >> /tmp/fusionX.log")
+else
+    sys.exec("echo 'Comparison failed: [" .. server_response .. "]' >> /tmp/fusionX.log")
+end
+
+local message_section = m:section(NamedSection, "settings", "fusionX", translate("Notifications"))
+local message = message_section:option(DummyValue, "message", translate("Message"))
+message.value = message_text
+-- message.template = "cbi/empty"  -- Remove this line
+
+-- Conditionally create the upgrade button
+if show_upgrade_button then
+    local upgrade_btn = message_section:option(Button, "upgrade", translate("Upgrade firmware"))
+    upgrade_btn.inputtitle = translate("Upgrade")
+    upgrade_btn.inputstyle = "apply"
+    
+    function upgrade_btn.write(self, section)
+        local template = message:formvalue(section)
+        local download_command = "curl -o /tmp/fusionXUpgrade.itb http://102.132.169.58:4268/getcurrentversion"
+        local result = sys.exec(download_command)
+        -- Check if the curl command was successful
+        -- if /tmp/fusionXUpgrade.itb and download was successful then upgrade
+        if file_exists("/tmp/fusionXUpgrade.itb") then
+            sys.exec("sysupgrade /tmp/fusionXUpgrade.itb")
+            luci.http.redirect(luci.dispatcher.build_url("admin", "fusionx", "bonding") .. "?message=Upgrade%20successful")
+        else
+            luci.http.redirect(luci.dispatcher.build_url("admin", "fusionx", "bonding") .. "?message=Upgrade%20failed")
+        end 
+    end
+end
+
+-- Define a section tied to UCI config 'fusionX'
+local p = m:section(NamedSection, "settings", "fusionX", translate("Settings"))
+
+-- Define an option tied to 'bond_enabled' in UCI
+-- if bond_enabled is not present, set it to '0'
+if not uci:get("fusionX", "settings", "bond_enabled") then
+    uci:set("fusionX", "settings", "bond_enabled", "0")
+    uci:commit("fusionX")
+end
+
+local po = p:option(Flag, "bond_enabled", translate("Enable Bonding"))
+po.default = "0"  -- Set default to '0' to ensure it is always present
+
+local xm = p:option(Flag, "isxms", translate("XMS"))
+
+local clientcomp_value = uci:get("fusionX", "settings", "clientcomp")
+local clientcomp = p:option(Value, "clientcomp", translate("Client Company"))
+if clientcomp_value == "none" then
+    clientcomp.default = "Please set company"
+else
+    clientcomp.default = clientcomp_value
+end
+
+local clientxms_value = uci:get("fusionX", "settings", "xmsname")
+local clientxms = p:option(Value, "xmsname", translate("Device Name"))
+if clientxms_value == "none" then
+    clientxms.default = "Please set Device Name"
+else
+    clientxms.default = clientxms_value
+end
+
+local client_name = p:option(Value, "clientname", translate("Client Name"))
+
+local activation_key = p:option(Value, "activation_key", translate("Activation Key"))
+
+-- Define a button to submit the activation key
+local activate_btn = p:option(Button, "_activate_btn", translate("Activate"))
+activate_btn.inputtitle = translate("Redetect Sims")
+activate_btn.inputstyle = "apply"
+
+function activate_btn.write(self, section)
+    local key = activation_key:formvalue(section)
+    sys.exec("sh /etc/config/Simredetect.sh &")
+    luci.http.redirect(luci.dispatcher.build_url("admin", "fusionx", "bonding"))
+    -- local activated = uci:get("fusionX", "settings", "activated")
+
+    -- if activated == "0" and key then
+    --     -- local response = sys.exec("curl -s -X POST -d 'key=" .. key .. "' http://102.132.169.58:4268/activatelicense")
+    --     uci:set("fusionX", "settings", "activated", "1")
+    --     uci:set("fusionX", "settings", "activation_key", key)
+    --     uci:commit("fusionX")
+    --     luci.sys.call("/etc/init.d/fusionX reload")
+    --     luci.http.redirect(luci.dispatcher.build_url("admin", "fusionx", "bonding") .. "?message=Activation%20successful")
+    -- else
+    --     luci.sys.call("/etc/init.d/fusionX reload")
+    --     luci.http.redirect(luci.dispatcher.build_url("admin", "fusionx", "bonding") .. "?message=Already%Activated")
+    -- end
+end
+
+local interfaces = {"wwan0", "wwan1", "wwan2", "lan1", "lan2", "wan", "eth1", "eth2"}
+
+local function get_rx_tx(iface)
+    local rx = sys.exec("cat /sys/class/net/" .. iface .. "/statistics/rx_bytes")
+    local tx = sys.exec("cat /sys/class/net/" .. iface .. "/statistics/tx_bytes")
+    
+    return rx, tx
+end
+
+-- Section for active interfaces
+local active_section = m:section(SimpleSection, nil, translate("Active Interfaces"))
+
+-- Create a table to display the interfaces
+local table = active_section:option(DummyValue, "_table", "")
+table.rawhtml = true
+
+local html = [[
+<style>
+    .chart-container {
+        width: 800px; 
+        height: 300px;
+        margin-top: 20px;
+    }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+<div id="charts-container"></div>
+<script type="text/javascript">
+    const chartColors = {
+        total: {
+            rx: ['rgba(75, 192, 192, 0.3)', 'rgba(75, 192, 192, 1)'],
+            tx: ['rgba(255, 99, 132, 0.3)', 'rgba(255, 99, 132, 1)']
+        },
+        interfaces: [
+            ['rgba(255, 159, 64, 0.3)', 'rgba(255, 159, 64, 1)'],   // orange
+            ['rgba(153, 102, 255, 0.3)', 'rgba(153, 102, 255, 1)'], // purple
+            ['rgba(54, 162, 235, 0.3)', 'rgba(54, 162, 235, 1)'],   // blue
+            ['rgba(255, 206, 86, 0.3)', 'rgba(255, 206, 86, 1)'],   // yellow
+            ['rgba(75, 192, 192, 0.3)', 'rgba(75, 192, 192, 1)'],   // green
+            ['rgba(255, 99, 132, 0.3)', 'rgba(255, 99, 132, 1)'],   // red
+            ['rgba(128, 0, 128, 0.3)', 'rgba(128, 0, 128, 1)'],     // deep purple
+            ['rgba(0, 128, 128, 0.3)', 'rgba(0, 128, 128, 1)'],     // teal
+            ['rgba(255, 140, 0, 0.3)', 'rgba(255, 140, 0, 1)'],     // dark orange
+            ['rgba(106, 90, 205, 0.3)', 'rgba(106, 90, 205, 1)'],   // slate blue
+            ['rgba(60, 179, 113, 0.3)', 'rgba(60, 179, 113, 1)'],   // medium sea green
+            ['rgba(219, 112, 147, 0.3)', 'rgba(219, 112, 147, 1)'], // pale violet red
+            ['rgba(70, 130, 180, 0.3)', 'rgba(70, 130, 180, 1)'],   // steel blue
+            ['rgba(205, 92, 92, 0.3)', 'rgba(205, 92, 92, 1)'],     // indian red
+            ['rgba(147, 112, 219, 0.3)', 'rgba(147, 112, 219, 1)'], // medium purple
+            ['rgba(32, 178, 170, 0.3)', 'rgba(32, 178, 170, 1)'],   // light sea green
+        ]
+    };
+
+    const previousData = {
+        total: { rx: 0, tx: 0, timestamp: new Date() },
+        interfaces: {}
+    };
+    
+    const ctx = document.createElement('canvas');
+    ctx.className = 'chart-container';
+    document.getElementById('charts-container').appendChild(ctx);
+
+    let chart;
+
+    function initializeChart() {
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Total Download (Mbps)',
+                        borderColor: chartColors.total.rx[1],
+                        backgroundColor: chartColors.total.rx[0],
+                        data: [],
+                        fill: true,
+                        tension: 0.2
+                    },
+                    {
+                        label: 'Total Upload (Mbps)',
+                        borderColor: chartColors.total.tx[1],
+                        backgroundColor: chartColors.total.tx[0],
+                        data: [],
+                        fill: true,
+                        tension: 0.2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'second'
+                        }
+                    },
+                    y: {
+                        beginAtZero: true
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
+    }
+
+    function updateStatistics() {
+        fetch('/cgi-bin/luci/admin/fusionx/statistics')
+            .then(response => response.json())
+            .then(data => {
+                const now = new Date();
+                let totalRx = 0;
+                let totalTx = 0;
+                console.log(data);
+                const currentInterfaces = new Set(data.map(item => item.iface));
+                
+                data.forEach((item, index) => {
+                    if (!previousData.interfaces[item.iface]) {
+                        previousData.interfaces[item.iface] = {
+                            rx: parseInt(item.rx) || 0,
+                            tx: parseInt(item.tx) || 0,
+                            timestamp: now
+                        };
+                        const colorIndex = index % chartColors.interfaces.length;
+                        
+                        chart.data.datasets.push({
+                            label: `${item.iface} Download`,
+                            borderColor: chartColors.interfaces[colorIndex][1],
+                            backgroundColor: chartColors.interfaces[colorIndex][0],
+                            data: [],
+                            fill: false,
+                            tension: 0.2,
+                            pointRadius: 0,
+                            borderWidth: 1,
+                            interfaceId: item.iface,
+                            isRx: true
+                        });
+                        chart.data.datasets.push({
+                            label: `${item.iface} Upload`,
+                            borderColor: chartColors.interfaces[colorIndex][1],
+                            backgroundColor: chartColors.interfaces[colorIndex][0],
+                            data: [],
+                            fill: false,
+                            tension: 0.2,
+                            pointRadius: 0,
+                            borderWidth: 1,
+                            interfaceId: item.iface,
+                            isRx: false,
+                            borderDash: [5, 5]
+                        });
+                    }
+                    totalRx += parseInt(item.rx) || 0;
+                    totalTx += parseInt(item.tx) || 0;
+                });
+
+                if (previousData.total.rx === 0 && previousData.total.tx === 0) {
+                    previousData.total = { rx: totalRx, tx: totalTx, timestamp: now };
+                    return;
+                }
+
+                const prev = previousData.total;
+                const timeDiff = (now - prev.timestamp) / 1000;
+
+                const rxDiff = (totalRx - prev.rx) * 8 / (timeDiff * 1024 * 1024);
+                const txDiff = (totalTx - prev.tx) * 8 / (timeDiff * 1024 * 1024);
+
+                chart.data.datasets.forEach(dataset => {
+                    if (dataset.interfaceId) {
+                        // Find the interface in current data
+                        const item = data.find(d => d.iface === dataset.interfaceId);
+                        
+                        if (item) {
+                            const interfaceData = previousData.interfaces[item.iface];
+                            if (dataset.isRx === false) {
+                                const txDiff = ((parseInt(item.tx) || 0) - interfaceData.tx) * 8 / (timeDiff * 1024 * 1024);
+                                dataset.data.push(txDiff);
+                            } else {
+                                const rxDiff = ((parseInt(item.rx) || 0) - interfaceData.rx) * 8 / (timeDiff * 1024 * 1024);
+                                dataset.data.push(rxDiff);
+                            }
+                        } else {
+                            dataset.data.push(0);
+                        }
+                    }
+                });
+
+                data.forEach(item => {
+                    previousData.interfaces[item.iface] = {
+                        rx: parseInt(item.rx) || 0,
+                        tx: parseInt(item.tx) || 0,
+                        timestamp: now
+                    };
+                });
+
+                chart.data.labels.push(now);
+                
+                chart.data.datasets[0].data.push(rxDiff);
+                chart.data.datasets[1].data.push(txDiff);
+
+                if (chart.data.labels.length > 30) {
+                    chart.data.labels.shift();
+                    chart.data.datasets.forEach(dataset => dataset.data.shift());
+                }
+
+                previousData.total = { rx: totalRx, tx: totalTx, timestamp: now };
+                chart.update();
+            })
+            .catch(error => console.error('Error fetching statistics:', error));
+    }
+
+    initializeChart();
+    setInterval(updateStatistics, 1500);
+    updateStatistics();
+</script>
+]]
+
+-- if uci:get("fusionX", "settings", "bond_enabled") == "1" then
+    table.value = html
+-- end
+
+local apply = luci.http.formvalue("cbi.apply")
+if apply then
+    luci.sys.call("/etc/init.d/fusionX reload")
+end
+
+return m
