@@ -16,30 +16,25 @@ end
 
 -- Fetch current IP address
 local current_ip = uci:get("fusionX", "settings", "public_ip")
--- if public ip does not start with 102 then set it to 0.0.0.0
--- Display current IP address at the top of the page
+
 if(current_ip == "0.0.0.0") then
     sys.exec("/etc/init.d/fusionX disable")
 end
 
 current_ip = uci:get("fusionX", "settings", "public_ip")
--- if public ip does not start with 102 then set it to 0.0.0.0
--- Display current IP address at the top of the page
 m.description = translate("Bond Server: ") .. current_ip
 -- Get the MAC address
 local mac_address = "none"
 
--- Get the current version from the configuration file
 local current_version = uci:get("fusionX", "settings", "version")
 
--- Run the curl command to get the message from the server
 local curl_command = string.format("curl -s -m 2 -X POST -d 'mac=%s&versionthis=%s' http://102.132.169.58:4268/fusionxversion", mac_address, versionthis)
 local server_response = sys.exec(curl_command):gsub("\n", ""):gsub("^%s*(.-)%s*$", "%1")
 server_response = server_response:gsub('^"(.-)"$', '%1')
--- Compare the versions and set the message
+
 local message_text = "up to date"
 local show_upgrade_button = false
--- Log the server response
+
 sys.exec("echo 'Processed server response: " .. server_response .. "' >> /tmp/fusionX.log")
 
 if server_response == "upgrade" then
@@ -53,9 +48,7 @@ end
 local message_section = m:section(NamedSection, "settings", "fusionX", translate("Notifications"))
 local message = message_section:option(DummyValue, "message", translate("Message"))
 message.value = message_text
--- message.template = "cbi/empty"  -- Remove this line
 
--- Conditionally create the upgrade button
 if show_upgrade_button then
     local upgrade_btn = message_section:option(Button, "upgrade", translate("Upgrade firmware"))
     upgrade_btn.inputtitle = translate("Upgrade")
@@ -258,101 +251,63 @@ local html = [[
         fetch('/cgi-bin/luci/admin/fusionx/statistics')
             .then(response => response.json())
             .then(data => {
-                const now = new Date();
-                let totalRx = 0;
-                let totalTx = 0;
-                console.log(data);
-                const currentInterfaces = new Set(data.map(item => item.iface));
-                
-                data.forEach((item, index) => {
-                    if (!previousData.interfaces[item.iface]) {
-                        previousData.interfaces[item.iface] = {
-                            rx: parseInt(item.rx) || 0,
-                            tx: parseInt(item.tx) || 0,
-                            timestamp: now
-                        };
-                        const colorIndex = index % chartColors.interfaces.length;
-                        
-                        chart.data.datasets.push({
-                            label: `${item.iface} Download`,
-                            borderColor: chartColors.interfaces[colorIndex][1],
-                            backgroundColor: chartColors.interfaces[colorIndex][0],
-                            data: [],
-                            fill: false,
-                            tension: 0.2,
-                            pointRadius: 0,
-                            borderWidth: 1,
-                            interfaceId: item.iface,
-                            isRx: true
-                        });
-                        chart.data.datasets.push({
-                            label: `${item.iface} Upload`,
-                            borderColor: chartColors.interfaces[colorIndex][1],
-                            backgroundColor: chartColors.interfaces[colorIndex][0],
-                            data: [],
-                            fill: false,
-                            tension: 0.2,
-                            pointRadius: 0,
-                            borderWidth: 1,
-                            interfaceId: item.iface,
-                            isRx: false,
-                            borderDash: [5, 5]
-                        });
-                    }
-                    totalRx += parseInt(item.rx) || 0;
-                    totalTx += parseInt(item.tx) || 0;
+            const now = new Date();
+            const currentInterfaces = new Set(data.interfaces.map(item => item.iface));
+            
+            // First update: Initialize datasets if they don't exist
+            if (chart.data.datasets.length <= 2) { // Only total upload/download exist
+                data.interfaces.forEach((item, index) => {
+                    const colorIndex = index % chartColors.interfaces.length;
+                    
+                    chart.data.datasets.push({
+                        label: `${item.iface} Download`,
+                        borderColor: chartColors.interfaces[colorIndex][1],
+                        backgroundColor: chartColors.interfaces[colorIndex][0],
+                        data: new Array(chart.data.labels.length).fill(0), // Fill with zeros to match existing labels
+                        fill: false,
+                        tension: 0.2,
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        interfaceId: item.iface,
+                        isRx: true
+                    });
+                    
+                    chart.data.datasets.push({
+                        label: `${item.iface} Upload`,
+                        borderColor: chartColors.interfaces[colorIndex][1],
+                        backgroundColor: chartColors.interfaces[colorIndex][0],
+                        data: new Array(chart.data.labels.length).fill(0), // Fill with zeros to match existing labels
+                        fill: false,
+                        tension: 0.2,
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        interfaceId: item.iface,
+                        isRx: false,
+                        borderDash: [5, 5]
+                    });
                 });
+            }
 
-                if (previousData.total.rx === 0 && previousData.total.tx === 0) {
-                    previousData.total = { rx: totalRx, tx: totalTx, timestamp: now };
-                    return;
+            chart.data.datasets.forEach(dataset => {
+                if (dataset.interfaceId) {
+                    const item = data.interfaces.find(d => d.iface === dataset.interfaceId);
+                    if (item) {
+                        dataset.data.push(dataset.isRx ? item.rx_speed : item.tx_speed);
+                    } else {
+                        dataset.data.push(0);
+                    }
                 }
+            });
 
-                const prev = previousData.total;
-                const timeDiff = (now - prev.timestamp) / 1000;
+            chart.data.labels.push(now);
+            chart.data.datasets[0].data.push(data.total.rx_speed);
+            chart.data.datasets[1].data.push(data.total.tx_speed);
 
-                const rxDiff = (totalRx - prev.rx) * 8 / (timeDiff * 1024 * 1024);
-                const txDiff = (totalTx - prev.tx) * 8 / (timeDiff * 1024 * 1024);
-
-                chart.data.datasets.forEach(dataset => {
-                    if (dataset.interfaceId) {
-                        // Find the interface in current data
-                        const item = data.find(d => d.iface === dataset.interfaceId);
-                        
-                        if (item) {
-                            const interfaceData = previousData.interfaces[item.iface];
-                            if (dataset.isRx === false) {
-                                const txDiff = ((parseInt(item.tx) || 0) - interfaceData.tx) * 8 / (timeDiff * 1024 * 1024);
-                                dataset.data.push(txDiff);
-                            } else {
-                                const rxDiff = ((parseInt(item.rx) || 0) - interfaceData.rx) * 8 / (timeDiff * 1024 * 1024);
-                                dataset.data.push(rxDiff);
-                            }
-                        } else {
-                            dataset.data.push(0);
-                        }
-                    }
-                });
-
-                data.forEach(item => {
-                    previousData.interfaces[item.iface] = {
-                        rx: parseInt(item.rx) || 0,
-                        tx: parseInt(item.tx) || 0,
-                        timestamp: now
-                    };
-                });
-
-                chart.data.labels.push(now);
-                
-                chart.data.datasets[0].data.push(rxDiff);
-                chart.data.datasets[1].data.push(txDiff);
-
-                if (chart.data.labels.length > 30) {
-                    chart.data.labels.shift();
+            if (chart.data.labels.length > 30) {
+                chart.data.labels.shift();
                     chart.data.datasets.forEach(dataset => dataset.data.shift());
                 }
 
-                previousData.total = { rx: totalRx, tx: totalTx, timestamp: now };
                 chart.update();
             })
             .catch(error => console.error('Error fetching statistics:', error));
