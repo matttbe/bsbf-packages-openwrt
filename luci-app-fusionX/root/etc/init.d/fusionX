@@ -164,7 +164,7 @@ monitor_bandwidth() {
     uci set fusionX.settings.is_monitoring='1'
     uci commit fusionX
     while true; do
-        enabled= $(uci get fusionX.settings.bond_enabled)
+        enabled=$(uci get fusionX.settings.bond_enabled)
         if [ "$enabled" -eq 1 ]; then
             # Get current total tx/rx values
             RX_now=$(get_total_rx)
