@@ -172,7 +172,7 @@ startstop() {
         sh /etc/config/xpexms.sh >/dev/null 2>&1 &
     fi
     #for some fucking reason the bond_enabled option dissapears when the cbi checkbox is unchecked and the config file only updates after this logic has run so if the field exists then user just deactivated bond
-    if uci get fusionX.settings.bond_enabled >/dev/null 2>&1 || [ "$(uci get fusionX.settings.bond_enabled)" != "0" ]; then 
+    if uci get fusionX.settings.bond_enabled >/dev/null 2>&1; then 
         logger -t fusionX "stopping bonding..."
         if [ -f /etc/nftables.d/proxy.nft ]; then
             mv /etc/nftables.d/proxy.nft /root/
