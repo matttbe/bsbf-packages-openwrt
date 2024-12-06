@@ -59,6 +59,17 @@ textc.value = [[
     </div>
 ]]
 
+e = m:section(SimpleSection, nil, translate("<h2>License Activation</h2>"))
+
+-- Text
+local texte = d:option(DummyValue, "_text")
+texte.rawhtml = true
+texte.value = [[
+    <div class="cbi-value-field">
+        To enable a new License, enter your key in the Activation Key on FusionX bonding page then restart the bond by deactivating and activating again:<br><br>
+    </div>
+]]
+
 d = m:section(SimpleSection, nil, translate("<h2>Socials</h2>"))
 
 -- Text
