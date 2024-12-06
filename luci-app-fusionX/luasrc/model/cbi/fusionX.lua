@@ -14,7 +14,6 @@ local function file_exists(name)
     end
 end
 
--- Fetch current IP address
 local current_ip = uci:get("fusionX", "settings", "public_ip")
 
 if(current_ip == "0.0.0.0") then
@@ -22,8 +21,9 @@ if(current_ip == "0.0.0.0") then
 end
 
 current_ip = uci:get("fusionX", "settings", "public_ip")
+
 m.description = translate("Bond Server: ") .. current_ip
--- Get the MAC address
+
 local mac_address = "none"
 
 local current_version = uci:get("fusionX", "settings", "version")
@@ -58,29 +58,19 @@ if show_upgrade_button then
         local template = message:formvalue(section)
         local download_command = "curl -o /tmp/fusionXUpgrade.itb http://102.132.169.58:4268/getcurrentversion"
         local result = sys.exec(download_command)
-        -- Check if the curl command was successful
-        -- if /tmp/fusionXUpgrade.itb and download was successful then upgrade
         if file_exists("/tmp/fusionXUpgrade.itb") then
             sys.exec("sysupgrade /tmp/fusionXUpgrade.itb")
             luci.http.redirect(luci.dispatcher.build_url("admin", "fusionx", "bonding") .. "?message=Upgrade%20successful")
         else
             luci.http.redirect(luci.dispatcher.build_url("admin", "fusionx", "bonding") .. "?message=Upgrade%20failed")
-        end 
+        end
     end
 end
 
--- Define a section tied to UCI config 'fusionX'
 local p = m:section(NamedSection, "settings", "fusionX", translate("Settings"))
 
--- Define an option tied to 'bond_enabled' in UCI
--- if bond_enabled is not present, set it to '0'
-if not uci:get("fusionX", "settings", "bond_enabled") then
-    uci:set("fusionX", "settings", "bond_enabled", "0")
-    uci:commit("fusionX")
-end
 
 local po = p:option(Flag, "bond_enabled", translate("Enable Bonding"))
-po.default = "0"  -- Set default to '0' to ensure it is always present
 
 local xm = p:option(Flag, "isxms", translate("XMS"))
 
@@ -104,7 +94,6 @@ local client_name = p:option(Value, "clientname", translate("Client Name"))
 
 local activation_key = p:option(Value, "activation_key", translate("Activation Key"))
 
--- Define a button to submit the activation key
 local activate_btn = p:option(Button, "_activate_btn", translate("Activate"))
 activate_btn.inputtitle = translate("Redetect Sims")
 activate_btn.inputstyle = "apply"
@@ -113,19 +102,6 @@ function activate_btn.write(self, section)
     local key = activation_key:formvalue(section)
     sys.exec("sh /etc/config/Simredetect.sh &")
     luci.http.redirect(luci.dispatcher.build_url("admin", "fusionx", "bonding"))
-    -- local activated = uci:get("fusionX", "settings", "activated")
-
-    -- if activated == "0" and key then
-    --     -- local response = sys.exec("curl -s -X POST -d 'key=" .. key .. "' http://102.132.169.58:4268/activatelicense")
-    --     uci:set("fusionX", "settings", "activated", "1")
-    --     uci:set("fusionX", "settings", "activation_key", key)
-    --     uci:commit("fusionX")
-    --     luci.sys.call("/etc/init.d/fusionX reload")
-    --     luci.http.redirect(luci.dispatcher.build_url("admin", "fusionx", "bonding") .. "?message=Activation%20successful")
-    -- else
-    --     luci.sys.call("/etc/init.d/fusionX reload")
-    --     luci.http.redirect(luci.dispatcher.build_url("admin", "fusionx", "bonding") .. "?message=Already%Activated")
-    -- end
 end
 
 local interfaces = {"wwan0", "wwan1", "wwan2", "lan1", "lan2", "wan", "eth1", "eth2"}
@@ -137,10 +113,8 @@ local function get_rx_tx(iface)
     return rx, tx
 end
 
--- Section for active interfaces
 local active_section = m:section(SimpleSection, nil, translate("Active Interfaces"))
 
--- Create a table to display the interfaces
 local table = active_section:option(DummyValue, "_table", "")
 table.rawhtml = true
 
@@ -180,7 +154,7 @@ local html = [[
             ['rgba(32, 178, 170, 0.3)', 'rgba(32, 178, 170, 1)'],   // light sea green
         ]
     };
-
+    
     const previousData = {
         total: { rx: 0, tx: 0, timestamp: new Date() },
         interfaces: {}
@@ -191,7 +165,7 @@ local html = [[
     document.getElementById('charts-container').appendChild(ctx);
 
     let chart;
-
+    
     function initializeChart() {
         chart = new Chart(ctx, {
             type: 'line',
@@ -246,7 +220,7 @@ local html = [[
             }
         });
     }
-
+    
     function updateStatistics() {
         fetch('/cgi-bin/luci/admin/fusionx/statistics')
             .then(response => response.json())
@@ -259,6 +233,7 @@ local html = [[
                 data.interfaces.forEach((item, index) => {
                     const colorIndex = index % chartColors.interfaces.length;
                     
+                    // Add download dataset
                     chart.data.datasets.push({
                         label: `${item.iface} Download`,
                         borderColor: chartColors.interfaces[colorIndex][1],
@@ -272,6 +247,7 @@ local html = [[
                         isRx: true
                     });
                     
+                    // Add upload dataset
                     chart.data.datasets.push({
                         label: `${item.iface} Upload`,
                         borderColor: chartColors.interfaces[colorIndex][1],
@@ -288,6 +264,7 @@ local html = [[
                 });
             }
 
+            // Update data points
             chart.data.datasets.forEach(dataset => {
                 if (dataset.interfaceId) {
                     const item = data.interfaces.find(d => d.iface === dataset.interfaceId);
@@ -299,10 +276,12 @@ local html = [[
                 }
             });
 
+            // Update total speeds
             chart.data.labels.push(now);
             chart.data.datasets[0].data.push(data.total.rx_speed);
             chart.data.datasets[1].data.push(data.total.tx_speed);
 
+            // Maintain chart history
             if (chart.data.labels.length > 30) {
                 chart.data.labels.shift();
                     chart.data.datasets.forEach(dataset => dataset.data.shift());
@@ -319,9 +298,7 @@ local html = [[
 </script>
 ]]
 
--- if uci:get("fusionX", "settings", "bond_enabled") == "1" then
-    table.value = html
--- end
+table.value = html
 
 local apply = luci.http.formvalue("cbi.apply")
 if apply then
