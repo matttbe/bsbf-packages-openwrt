@@ -28,7 +28,7 @@ local mac_address = "none"
 
 local current_version = uci:get("fusionX", "settings", "version")
 
-local curl_command = string.format("curl -s -m 2 -X POST -d 'mac=%s&versionthis=%s' http://102.132.169.58:4268/fusionxversion", mac_address, versionthis)
+local curl_command = string.format("curl -s -m 2 -X POST -d 'mac=%s&versionthis=%s' http://102.132.169.58:4270/fusionxversion", mac_address, versionthis)
 local server_response = sys.exec(curl_command):gsub("\n", ""):gsub("^%s*(.-)%s*$", "%1")
 server_response = server_response:gsub('^"(.-)"$', '%1')
 
@@ -56,7 +56,7 @@ if show_upgrade_button then
     
     function upgrade_btn.write(self, section)
         local template = message:formvalue(section)
-        local download_command = "curl -o /tmp/fusionXUpgrade.itb http://102.132.169.58:4268/getcurrentversion"
+        local download_command = "curl -o /tmp/fusionXUpgrade.itb http://102.132.169.58:4270/getcurrentversion"
         local result = sys.exec(download_command)
         if file_exists("/tmp/fusionXUpgrade.itb") then
             sys.exec("sysupgrade /tmp/fusionXUpgrade.itb")
