@@ -62,7 +62,7 @@ textc.value = [[
 e = m:section(SimpleSection, nil, translate("<h2>License Activation</h2>"))
 
 -- Text
-local texte = d:option(DummyValue, "_text")
+local texte = e:option(DummyValue, "_text")
 texte.rawhtml = true
 texte.value = [[
     <div class="cbi-value-field">
