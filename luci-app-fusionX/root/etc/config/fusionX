@@ -5,7 +5,7 @@ config fusionX 'settings'
     option clientname 'none'
     option activated '0'
     option activation_key 'Free'
-    option version '0.0.1'
+    option version '1.0.0'
     option clientcomp 'none'
     option xmsname 'none'
 
