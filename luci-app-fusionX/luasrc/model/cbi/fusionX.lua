@@ -28,7 +28,7 @@ local mac_address = "none"
 
 local current_version = uci:get("fusionX", "settings", "version")
 
-local curl_command = string.format("curl -s -m 2 -X POST -d 'mac=%s&versionthis=%s' http://102.132.169.58:4270/fusionxversion", mac_address, versionthis)
+local curl_command = string.format("curl -s -m 2 -X POST -d 'versionthis=%s' http://102.132.169.58:4270/fusionxversion", current_version)
 local server_response = sys.exec(curl_command):gsub("\n", ""):gsub("^%s*(.-)%s*$", "%1")
 server_response = server_response:gsub('^"(.-)"$', '%1')
 
