@@ -359,15 +359,10 @@ void process_tun_packet(int tun_fd, int udp_fd, struct tunnel_config *config) {
 
 	// Determine destination UDP port based on endpoint_port or stored connection
 	if (config->endpoint_port == 0) {
-		char addr_str[INET_ADDRSTRLEN];
-		inet_ntop(AF_INET, &daddr, addr_str, INET_ADDRSTRLEN);
 		dport = get_stored_port(config, daddr, ntohs(tcp->tcp_dest));
 		if (dport == 0) {
-			printf("No entry found for IPv4 addr %s TCP port %d\n", addr_str, ntohs(tcp->tcp_dest));
 			return; // No stored port and no endpoint port configured
 		}
-		printf("Found stored UDP port %d for IPv4 addr %s TCP port %d\n", 
-		       dport, addr_str, ntohs(tcp->tcp_dest));
 	} else {
 		dport = config->endpoint_port;
 	}
@@ -442,12 +437,6 @@ void process_udp_packet(int tun_fd, int udp_fd, struct tunnel_config *config) {
 	struct udphdr *udp = (struct udphdr *)(buffer + IP_HEADER_LEN);
 	struct tcphdr *tcp = (struct tcphdr *)(buffer + IP_HEADER_LEN + UDP_HEADER_LEN);
 
-	// Verify this is a UDP packet for our listen port
-	if (ip->protocol != IPPROTO_UDP ||
-		ntohs(udp->udp_dest) != config->listen_port) {
-		return;
-	}
-
 	if (config->endpoint_port == 0) {
 		// Store the connection information (IPv4 saddr, UDP sport, TCP sport)
 		struct in_addr src_addr_ip;
@@ -455,11 +444,6 @@ void process_udp_packet(int tun_fd, int udp_fd, struct tunnel_config *config) {
 		store_connection(config, src_addr_ip,
 						ntohs(src_addr.sin_port),
 						ntohs(tcp->tcp_source));
-		// Print the stored entry details.
-		char addr_str[INET_ADDRSTRLEN];
-		inet_ntop(AF_INET, &src_addr_ip, addr_str, INET_ADDRSTRLEN);
-		printf("Stored new entry: IPv4 addr %s UDP port %d TCP port %d\n",
-			   addr_str, ntohs(src_addr.sin_port), ntohs(tcp->tcp_source));
 	}
 
 	// Get tunnel interface IP address
@@ -500,13 +484,4 @@ void process_udp_packet(int tun_fd, int udp_fd, struct tunnel_config *config) {
 
 	// Write decapsulated packet to TUN interface
 	write(tun_fd, decap_buffer, len - UDP_HEADER_LEN);
-
-	// Print packet details
-	char src_str[INET_ADDRSTRLEN], dst_str[INET_ADDRSTRLEN];
-	inet_ntop(AF_INET, &(new_ip->saddr), src_str, INET_ADDRSTRLEN);
-	inet_ntop(AF_INET, &(new_ip->daddr), dst_str, INET_ADDRSTRLEN);
-
-	printf("Wrote decapsulated packet to TUN: IPv4 %s -> %s, TCP %d -> %d\n",
-	    src_str, dst_str,
-	    ntohs(new_tcp->tcp_source), ntohs(new_tcp->tcp_dest));
 }
