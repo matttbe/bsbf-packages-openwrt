@@ -500,4 +500,13 @@ void process_udp_packet(int tun_fd, int udp_fd, struct tunnel_config *config) {
 
 	// Write decapsulated packet to TUN interface
 	write(tun_fd, decap_buffer, len - UDP_HEADER_LEN);
+
+	// Print packet details
+	char src_str[INET_ADDRSTRLEN], dst_str[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, &(new_ip->saddr), src_str, INET_ADDRSTRLEN);
+	inet_ntop(AF_INET, &(new_ip->daddr), dst_str, INET_ADDRSTRLEN);
+
+	printf("Wrote decapsulated packet to TUN: IPv4 %s -> %s, TCP %d -> %d\n",
+	    src_str, dst_str,
+	    ntohs(new_tcp->tcp_source), ntohs(new_tcp->tcp_dest));
 }
