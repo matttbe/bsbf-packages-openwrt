@@ -448,17 +448,19 @@ void process_udp_packet(int tun_fd, int udp_fd, struct tunnel_config *config) {
 		return;
 	}
 
-	// Store the connection information (IPv4 saddr, UDP sport, TCP sport)
-	struct in_addr src_addr_ip;
-	src_addr_ip.s_addr = src_addr.sin_addr.s_addr;
-	store_connection(config, src_addr_ip,
-					ntohs(src_addr.sin_port),
-					ntohs(tcp->tcp_source));
-	// Print the stored entry details.
-	char addr_str[INET_ADDRSTRLEN];
-	inet_ntop(AF_INET, &src_addr_ip, addr_str, INET_ADDRSTRLEN);
-	printf("Stored new entry: IPv4 addr %s UDP port %d TCP port %d\n",
-		   addr_str, ntohs(src_addr.sin_port), ntohs(tcp->tcp_source));
+	if (config->endpoint_port == 0) {
+		// Store the connection information (IPv4 saddr, UDP sport, TCP sport)
+		struct in_addr src_addr_ip;
+		src_addr_ip.s_addr = src_addr.sin_addr.s_addr;
+		store_connection(config, src_addr_ip,
+						ntohs(src_addr.sin_port),
+						ntohs(tcp->tcp_source));
+		// Print the stored entry details.
+		char addr_str[INET_ADDRSTRLEN];
+		inet_ntop(AF_INET, &src_addr_ip, addr_str, INET_ADDRSTRLEN);
+		printf("Stored new entry: IPv4 addr %s UDP port %d TCP port %d\n",
+			   addr_str, ntohs(src_addr.sin_port), ntohs(tcp->tcp_source));
+	}
 
 	// Get tunnel interface IP address
 	struct in_addr tun_addr;
