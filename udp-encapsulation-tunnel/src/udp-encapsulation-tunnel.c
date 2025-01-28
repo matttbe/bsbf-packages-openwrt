@@ -267,7 +267,7 @@ static void process_udp_packet(int tun_fd, int udp_fd, struct tunnel_config *con
 	new_ip->tos = 0;
 	new_ip->tot_len = htons(len + IP_HEADER_LEN);
 	new_ip->id = htons(rand());
-	new_ip->ttl = 64;
+	new_ip->ttl = 1; // It should not go further than one hop
 	new_ip->protocol = IPPROTO_TCP;
 	new_ip->saddr = src_addr.sin_addr.s_addr;
 	new_ip->daddr = tun_addr.s_addr;
