@@ -19,19 +19,11 @@
 // Compatibility layer for musl/glibc differences
 #ifdef __GLIBC__
 	// Using glibc
-	#define udp_source source
-	#define udp_dest dest
-	#define udp_len len
-	#define udp_check check
 	#define tcp_check check
 	#define tcp_source source
 	#define tcp_dest dest
 #else
 	// Using musl
-	#define udp_source uh_sport
-	#define udp_dest uh_dport
-	#define udp_len uh_ulen
-	#define udp_check uh_sum
 	#define tcp_check th_sum
 	#define tcp_source th_sport
 	#define tcp_dest th_dport
@@ -188,41 +180,9 @@ static uint16_t tcp_checksum(struct iphdr *ip, struct tcphdr *tcp, int len) {
 	return checksum;
 }
 
-static uint16_t udp_checksum(struct iphdr *ip, struct udphdr *udp, void *payload, int payload_len) {
-	struct {
-		uint32_t source_address;
-		uint32_t dest_address;
-		uint8_t placeholder;
-		uint8_t protocol;
-		uint16_t udp_length;
-	} pseudo_header;
-
-	// Fill pseudo header
-	pseudo_header.source_address = ip->saddr;
-	pseudo_header.dest_address = ip->daddr;
-	pseudo_header.placeholder = 0;
-	pseudo_header.protocol = IPPROTO_UDP;
-	pseudo_header.udp_length = udp->udp_len;
-
-	// Calculate total length and allocate memory
-	int total_len = sizeof(pseudo_header) + ntohs(udp->udp_len);
-	char *pseudogram = malloc(total_len);
-
-	// Copy headers and payload
-	memcpy(pseudogram, &pseudo_header, sizeof(pseudo_header));
-	memcpy(pseudogram + sizeof(pseudo_header), udp, sizeof(struct udphdr));
-	memcpy(pseudogram + sizeof(pseudo_header) + sizeof(struct udphdr), payload, payload_len);
-
-	// Calculate checksum
-	uint16_t checksum = ip_checksum(pseudogram, total_len);
-
-	free(pseudogram);
-	return checksum;
-}
-
+// encapsulate: read from TUN and write TCP header + payload to UDP socket
 static void process_tun_packet(int tun_fd, int udp_fd, struct tunnel_config *config) {
 	unsigned char buffer[BUFFER_SIZE];
-	unsigned char encap_buffer[BUFFER_SIZE];
 	int len;
 
 	len = read(tun_fd, buffer, BUFFER_SIZE);
@@ -251,47 +211,6 @@ static void process_tun_packet(int tun_fd, int udp_fd, struct tunnel_config *con
 		dport = config->endpoint_port;
 	}
 
-	// Create new IP + UDP header
-	struct iphdr *new_ip = (struct iphdr *)encap_buffer;
-	struct udphdr *udp = (struct udphdr *)(encap_buffer + IP_HEADER_LEN);
-
-	// Get source IP from bound interface
-	struct in_addr src_addr;
-	if (get_interface_ip(config->bind_device, &src_addr) < 0) {
-		fprintf(stderr, "Failed to get interface IP\n");
-		return;
-	}
-
-	// Setup new IP header
-	memset(new_ip, 0, IP_HEADER_LEN);
-	new_ip->version = 4;
-	new_ip->ihl = 5;
-	new_ip->tos = ip->tos;
-	new_ip->tot_len = htons(len + UDP_HEADER_LEN);
-	new_ip->id = htons(rand());
-	new_ip->ttl = 64;
-	new_ip->protocol = IPPROTO_UDP;
-	new_ip->saddr = src_addr.s_addr;
-	new_ip->daddr = ip->daddr;
-
-	// Calculate IP header checksum
-	new_ip->check = 0;
-	new_ip->check = ip_checksum(new_ip, IP_HEADER_LEN);
-
-	// Setup UDP header
-	udp->udp_source = htons(config->listen_port);
-	udp->udp_dest = htons(dport);
-	udp->udp_len = htons(len - IP_HEADER_LEN + UDP_HEADER_LEN);
-
-	// Copy original TCP payload
-	memcpy(encap_buffer + IP_HEADER_LEN + UDP_HEADER_LEN,
-		   buffer + IP_HEADER_LEN,
-		   len - IP_HEADER_LEN);
-
-	// Calculate UDP checksum
-	udp->udp_check = 0;
-	udp->udp_check = udp_checksum(new_ip, udp, buffer + IP_HEADER_LEN, len - IP_HEADER_LEN);
-
 	// Send encapsulated packet
 	struct sockaddr_in dest;
 	memset(&dest, 0, sizeof(dest));
@@ -299,10 +218,11 @@ static void process_tun_packet(int tun_fd, int udp_fd, struct tunnel_config *con
 	dest.sin_addr.s_addr = ip->daddr;
 	dest.sin_port = htons(dport);
 
-	sendto(udp_fd, encap_buffer, len + UDP_HEADER_LEN, 0,
+	sendto(udp_fd, tcp, len - IP_HEADER_LEN - UDP_HEADER_LEN, 0,
 		   (struct sockaddr*)&dest, sizeof(dest));
 }
 
+// decapsulate: read from UDP socket, write to TUN
 static void process_udp_packet(int tun_fd, int udp_fd, struct tunnel_config *config) {
 	unsigned char buffer[BUFFER_SIZE];
 	unsigned char decap_buffer[BUFFER_SIZE];
@@ -317,9 +237,7 @@ static void process_udp_packet(int tun_fd, int udp_fd, struct tunnel_config *con
 		return;
 	}
 
-	struct iphdr *ip = (struct iphdr *)buffer;
-	struct udphdr *udp = (struct udphdr *)(buffer + IP_HEADER_LEN);
-	struct tcphdr *tcp = (struct tcphdr *)(buffer + IP_HEADER_LEN + UDP_HEADER_LEN);
+	struct tcphdr *tcp = (struct tcphdr *)buffer;
 
 	if (config->endpoint_port == 0) {
 		// Store the connection information (IPv4 saddr, UDP sport, TCP sport)
@@ -344,8 +262,8 @@ static void process_udp_packet(int tun_fd, int udp_fd, struct tunnel_config *con
 	memset(new_ip, 0, IP_HEADER_LEN);
 	new_ip->version = 4;
 	new_ip->ihl = 5;
-	new_ip->tos = ip->tos;
-	new_ip->tot_len = htons(len - UDP_HEADER_LEN);
+	new_ip->tos = 0;
+	new_ip->tot_len = htons(len + IP_HEADER_LEN);
 	new_ip->id = htons(rand());
 	new_ip->ttl = 64;
 	new_ip->protocol = IPPROTO_TCP;
@@ -357,14 +275,12 @@ static void process_udp_packet(int tun_fd, int udp_fd, struct tunnel_config *con
 	new_ip->check = ip_checksum(new_ip, IP_HEADER_LEN);
 
 	// Copy TCP payload
-	memcpy(decap_buffer + IP_HEADER_LEN,
-		   buffer + IP_HEADER_LEN + UDP_HEADER_LEN,
-		   len - IP_HEADER_LEN - UDP_HEADER_LEN);
+	memcpy(decap_buffer + IP_HEADER_LEN, buffer, len);
 
 	// Calculate TCP checksum
 	struct tcphdr *new_tcp = (struct tcphdr *)(decap_buffer + IP_HEADER_LEN);
 	new_tcp->tcp_check = 0;
-	new_tcp->tcp_check = tcp_checksum(new_ip, new_tcp, len - IP_HEADER_LEN - UDP_HEADER_LEN);
+	new_tcp->tcp_check = tcp_checksum(new_ip, new_tcp, len);
 
 	// Write decapsulated packet to TUN interface
 	write(tun_fd, decap_buffer, len - UDP_HEADER_LEN);
